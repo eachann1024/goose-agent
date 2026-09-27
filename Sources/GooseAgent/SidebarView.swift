@@ -838,7 +838,7 @@ struct SidebarView: View {
                             .font(.system(size: 10.5))
                             .foregroundStyle(Theme.textSecondary)
                     }
-                    Text(model.filteredDevice?.name ?? "All Devices")
+                    Text(model.filteredDevice?.name ?? String(localized: "All Devices"))
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(Theme.text)
                     Circle()
@@ -943,6 +943,7 @@ struct TitlebarIconButton: View {
 struct DevicePopover: View {
     @ObservedObject var model: AppModel
     @Binding var isPresented: Bool
+    @State private var deviceToRemove: Device?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -985,37 +986,30 @@ struct DevicePopover: View {
             .buttonStyle(SidebarRowButtonStyle(selected: model.deviceFilter == nil))
 
             ForEach(model.devices) { device in
-                DevicePopoverRow(
-                    device: device,
-                    isActive: device.id == model.deviceFilter,
-                    connection: model.session(device.id).connection
-                ) {
-                    isPresented = false
-                    model.setDeviceFilter(device.id)
-                }
-                .contextMenu {
-                    if !device.isLocal {
-                        Button(String(localized: "Edit \(device.name)…")) {
-                            isPresented = false
-                            model.deviceToEdit = device
-                        }
-                        switch model.session(device.id).connection {
-                        case .connected, .connecting:
-                            Button(String(localized: "Close Connection")) {
-                                isPresented = false
-                                model.disconnectDevice(device)
-                            }
-                        case .failed, .idle:
-                            Button(String(localized: "Reconnect")) {
-                                isPresented = false
-                                model.reconnectDevice(device)
-                            }
-                        }
-                        Button(String(localized: "Remove \(device.name)"), role: .destructive) {
-                            isPresented = false
-                            model.removeDevice(device)
-                        }
+                HStack(spacing: 0) {
+                    DevicePopoverRow(
+                        device: device,
+                        isActive: device.id == model.deviceFilter,
+                        connection: model.session(device.id).connection
+                    ) {
+                        isPresented = false
+                        model.setDeviceFilter(device.id)
                     }
+                    .contextMenu { deviceActions(device) }
+
+                    Menu {
+                        deviceActions(device)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 24, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel(String(localized: "Manage \(device.name)"))
+                    .help(String(localized: "Edit or remove connection"))
+                    .padding(.trailing, 5)
                 }
             }
 
@@ -1038,6 +1032,44 @@ struct DevicePopover: View {
                 .strokeBorder(Theme.hairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.25), radius: 18, y: 8)
+        .alert(
+            "Remove Connection?",
+            isPresented: Binding(
+                get: { deviceToRemove != nil },
+                set: { if !$0 { deviceToRemove = nil } }
+            ),
+            presenting: deviceToRemove
+        ) { device in
+            Button("Cancel", role: .cancel) { deviceToRemove = nil }
+            Button("Remove", role: .destructive) {
+                model.removeDevice(device)
+                deviceToRemove = nil
+            }
+        } message: { device in
+            Text("Remove \(device.name) from this list? This only removes the saved connection; files and sessions on the device are not deleted.")
+        }
+    }
+
+    @ViewBuilder
+    private func deviceActions(_ device: Device) -> some View {
+        Button("Edit Connection…", systemImage: "pencil") {
+            isPresented = false
+            model.deviceToEdit = device
+        }
+        switch model.session(device.id).connection {
+        case .connected, .connecting:
+            Button("Close Connection", systemImage: "network.slash") {
+                model.disconnectDevice(device)
+            }
+        case .failed, .idle:
+            Button("Reconnect", systemImage: "arrow.clockwise") {
+                model.reconnectDevice(device)
+            }
+        }
+        Divider()
+        Button("Remove Connection…", systemImage: "trash", role: .destructive) {
+            deviceToRemove = device
+        }
     }
 
     private var connectedCount: Int {

@@ -39,12 +39,15 @@ final class GooseSessionDiscoveryTests: XCTestCase {
     }
 
     func testNamedSessionDeviceIsStableLocalWithSocketOverride() {
-        let session = GooseSessionDiscovery.NamedSession(name: "work", socketPath: "/tmp/x/gooseagent.sock")
+        let socketPath = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".config/gooseagent/sessions/work/gooseagent.sock").path
+        let session = GooseSessionDiscovery.NamedSession(name: "work", socketPath: socketPath)
         let device = GooseSessionDiscovery.device(for: session)
         XCTAssertTrue(device.isLocal)
         XCTAssertTrue(device.isNamedSession)
-        XCTAssertEqual(device.socketPath, "/tmp/x/gooseagent.sock")
+        XCTAssertEqual(device.socketPath, socketPath)
         XCTAssertEqual(device.name, "work")
+        XCTAssertFalse(Device(id: device.id, name: device.name, kind: .local, socketPath: "/tmp/custom.sock").isNamedSession)
         // Deterministic id: same name → same id, different names → different ids.
         XCTAssertEqual(device.id, GooseSessionDiscovery.device(for: session).id)
         XCTAssertNotEqual(

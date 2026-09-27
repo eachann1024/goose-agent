@@ -52,7 +52,18 @@ public struct Device: Codable, Sendable, Identifiable, Equatable, Hashable {
     /// A named gooseagent session surfaced as a Local device (issue #81): local, but
     /// pointed at `~/.config/gooseagent/sessions/<name>/gooseagent.sock` via `socketPath`.
     public var isNamedSession: Bool {
-        isLocal && socketPath != nil
+        #if os(macOS)
+        guard isLocal, id == GooseSessionDiscovery.deterministicID(for: name),
+              let socketPath else { return false }
+        let expectedPath = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".config/gooseagent/sessions", isDirectory: true)
+            .appendingPathComponent(name, isDirectory: true)
+            .appendingPathComponent("gooseagent.sock")
+            .path
+        return socketPath == expectedPath
+        #else
+        return false
+        #endif
     }
 
     public var subtitle: String {
@@ -80,23 +91,28 @@ public final class DeviceStore: @unchecked Sendable {
     public func load() -> [Device] {
         queue.sync {
             guard let data = try? Data(contentsOf: fileURL),
-                  let devices = try? JSONDecoder().decode([Device].self, from: data),
-                  !devices.isEmpty
+                  let devices = try? JSONDecoder().decode([Device].self, from: data)
             else { return [.local] }
-            // Local is always present and always first.
-            var list = devices.filter { !$0.isLocal }
-            list.insert(.local, at: 0)
-            return list
+            return devices
+        }
+    }
+
+    @discardableResult
+    public func persist(_ devices: [Device]) -> Bool {
+        queue.sync {
+            do {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let data = try encoder.encode(devices)
+                try data.write(to: fileURL, options: .atomic)
+                return true
+            } catch {
+                return false
+            }
         }
     }
 
     public func save(_ devices: [Device]) {
-        queue.sync {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            if let data = try? encoder.encode(devices) {
-                try? data.write(to: fileURL, options: .atomic)
-            }
-        }
+        _ = persist(devices)
     }
 }

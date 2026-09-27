@@ -556,6 +556,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var retainedSpaces: [RetainedSpace] = RetainedSpaceStore.load()
 
     private let store = DeviceStore()
+    private static let hiddenNamedDevicesKey = "device.hiddenNamedSessions"
+    private static let knownNamedDevicesKey = "device.knownNamedSessions"
     private var dismissedSpaceKeys: Set<String> = []
     private var spaceReviveTask: Task<Void, Never>?
     private var revivingSpaces: Set<SpaceRef> = []
@@ -1470,15 +1472,20 @@ final class AppModel: ObservableObject {
         return service
     }
 
-    /// Merges live gooseagent named sessions in as extra Local devices (issue #81)
-    /// and drops ones whose session went away. Discovered, never persisted:
-    /// named sessions come and go, unlike user-added SSH/tailcat devices.
+    /// Merges live named sessions, pruning only unpersisted discoveries that went away.
     func refreshNamedSessions() {
-        let discovered = GooseSessionDiscovery.namedSessions()
-            .map(GooseSessionDiscovery.device(for:))
+        let allDiscovered = GooseSessionDiscovery.namedSessions().map(GooseSessionDiscovery.device(for:))
+        let defaults = UserDefaults.standard
+        var knownIDs = Set(defaults.stringArray(forKey: Self.knownNamedDevicesKey) ?? [])
+        knownIDs.formUnion(allDiscovered.map { $0.id.uuidString })
+        defaults.set(knownIDs.sorted(), forKey: Self.knownNamedDevicesKey)
+        let hiddenIDs = Set(defaults.stringArray(forKey: Self.hiddenNamedDevicesKey) ?? [])
+        let discovered = allDiscovered
+            .filter { !hiddenIDs.contains($0.id.uuidString) }
         let discoveredIDs = Set(discovered.map(\.id))
-        // Named-session devices already present, by id.
-        let existingIDs = Set(devices.filter(\.isNamedSession).map(\.id))
+        // Include renamed/customized discovered devices too, so refresh never duplicates them.
+        let existingIDs = Set(devices.map(\.id))
+        let persistedIDs = Set(store.load().map(\.id))
 
         for device in discovered where !existingIDs.contains(device.id) {
             devices.append(device)
@@ -1486,7 +1493,8 @@ final class AppModel: ObservableObject {
             probeOSIfNeeded(device)
         }
         // Remove named-session devices whose session is gone.
-        for device in devices where device.isNamedSession && !discoveredIDs.contains(device.id) {
+        for device in devices where device.isNamedSession
+            && !discoveredIDs.contains(device.id) && !persistedIDs.contains(device.id) {
             stopSession(device.id)
             attachSessions.removeAll { $0.device.id == device.id }
             devices.removeAll { $0.id == device.id }
@@ -1666,11 +1674,32 @@ final class AppModel: ObservableObject {
 
     func addDevice(name: String, sshTarget: String) {
         let device = Device(name: name, kind: .ssh(target: sshTarget))
-        devices.append(device)
-        store.save(devices)
+        var updated = devices
+        updated.append(device)
+        guard persistDevices(updated) else { return }
+        devices = updated
         startSession(device)
         probeOSIfNeeded(device)
         setDeviceFilter(device.id)
+    }
+
+    @discardableResult
+    func addLocalDevice(name: String, socketPath: String) -> Bool {
+        guard let name = validatedDeviceName(name), let socketPath = validatedSocketPath(socketPath) else {
+            actionError = String(localized: "Enter a valid device name and socket path.")
+            return false
+        }
+        let id = socketPath == nil && !devices.contains(where: { $0.id == Device.local.id })
+            ? Device.local.id
+            : UUID()
+        let device = Device(id: id, name: name, kind: .local, socketPath: socketPath)
+        var updated = devices
+        updated.append(device)
+        guard persistDevices(updated) else { return false }
+        devices = updated
+        startSession(device)
+        setDeviceFilter(device.id)
+        return true
     }
 
     /// Adds a tailcat-tunnel device. The token is a bearer credential and goes
@@ -1683,8 +1712,13 @@ final class AppModel: ObservableObject {
             actionError = error.localizedDescription
             return
         }
-        devices.append(device)
-        store.save(devices)
+        var updated = devices
+        updated.append(device)
+        guard persistDevices(updated) else {
+            TailcatCredentialStore.removeToken(for: device.id)
+            return
+        }
+        devices = updated
         startSession(device)
         setDeviceFilter(device.id)
     }
@@ -1714,7 +1748,6 @@ final class AppModel: ObservableObject {
 
     /// Stops the live tunnel but keeps the device so the user can reconnect later.
     func disconnectDevice(_ device: Device) {
-        guard !device.isLocal else { return }
         if sshAuthenticationRequest?.deviceID == device.id {
             sshAuthenticationRequest = nil
         }
@@ -1757,37 +1790,146 @@ final class AppModel: ObservableObject {
         session(deviceID).connection == .idle
     }
 
-    /// Renames a device and/or updates its SSH target (e.g. after an IP change).
-    func updateDevice(_ id: UUID, name: String, sshTarget: String) {
-        guard let index = devices.firstIndex(where: { $0.id == id }), !devices[index].isLocal else { return }
-        let targetChanged = devices[index].sshTarget != sshTarget
-        devices[index].name = name
-        if targetChanged {
-            removeSSHPassword(for: id)
-            devices[index].kind = .ssh(target: sshTarget)
-            devices[index].osID = nil
-            stopSession(id)
-            startSession(devices[index])
-            probeOSIfNeeded(devices[index])
+    /// Edits the selected device without changing its transport or identity.
+    @discardableResult
+    func updateDevice(
+        _ id: UUID,
+        name: String,
+        sshTarget: String,
+        socketPath: String = "",
+        tailcatToken: String = ""
+    ) -> Bool {
+        guard let index = devices.firstIndex(where: { $0.id == id }),
+              let name = validatedDeviceName(name)
+        else {
+            actionError = String(localized: "Enter a valid device name.")
+            return false
         }
-        store.save(devices)
+        var updated = devices
+        let previous = updated[index]
+        updated[index].name = name
+        var endpointChanged = false
+        var tokenChanged = false
+        var previousTailcatToken: String?
+        switch previous.kind {
+        case .local:
+            guard let normalizedPath = validatedSocketPath(socketPath) else {
+                actionError = String(localized: "Enter a valid socket path.")
+                return false
+            }
+            endpointChanged = previous.socketPath != normalizedPath
+            updated[index].socketPath = normalizedPath
+        case .ssh:
+            guard let target = validatedSSHTarget(sshTarget) else {
+                actionError = String(localized: "Enter a valid SSH target.")
+                return false
+            }
+            endpointChanged = previous.sshTarget != target
+            if endpointChanged {
+                updated[index].kind = .ssh(target: target)
+                updated[index].osID = nil
+            }
+        case .tailcat:
+            let token = tailcatToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+                actionError = String(localized: "Enter a valid Tailcat token.")
+                return false
+            }
+            if !token.isEmpty {
+                do {
+                    previousTailcatToken = try TailcatCredentialStore.token(for: id)
+                    try TailcatCredentialStore.setToken(token, for: id)
+                    tokenChanged = previousTailcatToken != token
+                } catch {
+                    actionError = error.localizedDescription
+                    return false
+                }
+            }
+        }
+        guard persistDevices(updated) else {
+            if tokenChanged {
+                if let previousTailcatToken {
+                    do {
+                        try TailcatCredentialStore.setToken(previousTailcatToken, for: id)
+                    } catch {
+                        actionError = String(localized: "Could not save device settings.")
+                            + " " + error.localizedDescription
+                    }
+                } else {
+                    TailcatCredentialStore.removeToken(for: id)
+                }
+            }
+            return false
+        }
+        devices = updated
+        if endpointChanged || tokenChanged {
+            if previous.sshTarget != nil, endpointChanged { removeSSHPassword(for: id) }
+            stopSession(id)
+            startSession(updated[index])
+            probeOSIfNeeded(updated[index])
+        }
+        return true
     }
 
     func removeDevice(_ device: Device) {
-        guard !device.isLocal else { return }
+        guard devices.contains(where: { $0.id == device.id }) else { return }
+        var updated = devices
+        updated.removeAll { $0.id == device.id }
+        guard persistDevices(updated) else { return }
+        devices = updated
+        let defaults = UserDefaults.standard
+        let knownIDs = Set(defaults.stringArray(forKey: Self.knownNamedDevicesKey) ?? [])
+        if knownIDs.contains(device.id.uuidString) {
+            var hiddenIDs = Set(defaults.stringArray(forKey: Self.hiddenNamedDevicesKey) ?? [])
+            hiddenIDs.insert(device.id.uuidString)
+            defaults.set(hiddenIDs.sorted(), forKey: Self.hiddenNamedDevicesKey)
+        }
         removeSSHPassword(for: device.id)
         TailcatCredentialStore.removeToken(for: device.id)
         if sshAuthenticationRequest?.deviceID == device.id { sshAuthenticationRequest = nil }
         stopSession(device.id)
         attachSessions.removeAll { $0.device.id == device.id }
-        devices.removeAll { $0.id == device.id }
-        store.save(devices)
         if deviceFilter == device.id { deviceFilter = nil }
         if selectedSpace?.deviceID == device.id { selectedSpace = nil }
         if selectedPane?.deviceID == device.id {
             selectedPane = preferredVisibleAgent()?.ref ?? firstVisiblePaneRef
         }
         removeRetainedSpaces(deviceID: device.id)
+    }
+
+    private func persistDevices(_ updated: [Device]) -> Bool {
+        guard store.persist(updated) else {
+            actionError = String(localized: "Could not save device settings.")
+            return false
+        }
+        return true
+    }
+
+    private func validatedDeviceName(_ value: String) -> String? {
+        let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty,
+              !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else { return nil }
+        return name
+    }
+
+    private func validatedSocketPath(_ value: String) -> String?? {
+        let path = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if path.isEmpty { return .some(nil) }
+        guard (path.hasPrefix("/") || path.hasPrefix("~/")),
+              !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else { return nil }
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        guard expandedPath.hasPrefix("/") else { return nil }
+        return .some(expandedPath)
+    }
+
+    private func validatedSSHTarget(_ value: String) -> String? {
+        let target = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty, !target.hasPrefix("-"),
+              !target.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else { return nil }
+        return target
     }
 
     // MARK: - Refresh

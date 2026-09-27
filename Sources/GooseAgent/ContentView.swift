@@ -919,6 +919,7 @@ struct DetailView: View {
 
 struct AddDeviceSheet: View {
     enum Transport: String, CaseIterable {
+        case local
         case ssh
         case tailcat
     }
@@ -929,9 +930,12 @@ struct AddDeviceSheet: View {
     @State private var target = ""
     @State private var transport: Transport = .ssh
     @State private var token = ""
+    @State private var socketPath = ""
+    @State private var saveError: String?
 
     private var canAdd: Bool {
         switch transport {
+        case .local: return true
         case .ssh: return !target.trimmingCharacters(in: .whitespaces).isEmpty
         case .tailcat: return !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
@@ -942,7 +946,9 @@ struct AddDeviceSheet: View {
             SheetHeader(
                 systemImage: "desktopcomputer",
                 title: String(localized: "Add Device"),
-                subtitle: transport == .ssh
+                subtitle: transport == .local
+                    ? String(localized: "Connect to Goose Agent on this Mac")
+                    : transport == .ssh
                     ? String(localized: "Uses OpenSSH config, agent, Tailscale SSH, or password")
                     : String(localized: "WireGuard tunnel to a Goose Agent behind NAT — no VPN, no account")
             )
@@ -950,6 +956,7 @@ struct AddDeviceSheet: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Picker("", selection: $transport) {
+                    Text("This Mac").tag(Transport.local)
                     Text(String(localized: "SSH")).tag(Transport.ssh)
                     Text(String(localized: "Tailcat")).tag(Transport.tailcat)
                 }
@@ -961,7 +968,14 @@ struct AddDeviceSheet: View {
                     .textFieldStyle(.roundedBorder)
                 Spacer().frame(height: 8)
                 Group {
-                    if transport == .ssh {
+                    if transport == .local {
+                        SheetSectionLabel("SOCKET PATH")
+                        TextField("Default socket (leave empty)", text: $socketPath)
+                            .textFieldStyle(.roundedBorder)
+                        Text("Leave empty for the default socket, or enter an absolute path or ~/ path.")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Theme.textTertiary)
+                    } else if transport == .ssh {
                         SheetSectionLabel("SSH TARGET")
                         TextField("vincent@10.10.10.87", text: $target)
                             .textFieldStyle(.roundedBorder)
@@ -970,7 +984,7 @@ struct AddDeviceSheet: View {
                             .foregroundStyle(Theme.textTertiary)
                     } else {
                         SheetSectionLabel("TAILCAT TOKEN")
-                        TextField("tcpGFwWCD…", text: $token)
+                        SecureField("tcpGFwWCD…", text: $token)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 11, design: .monospaced))
                         Text(String(localized: "On the remote Mac: `gooseagent plugin install lbr77/gooseagent-plugin-tailcat`, then `gooseagent plugin action invoke gooseagent.tailcat.token` and paste the token here. The WireGuard tunnel is built in — no external tool. The token is stored in the Keychain. Standalone shells and the Files workspace need SSH."))
@@ -980,6 +994,9 @@ struct AddDeviceSheet: View {
                     }
                 }
                 .frame(alignment: .topLeading)
+                if let saveError {
+                    Text(saveError).font(.callout).foregroundStyle(Theme.danger)
+                }
             }
             .padding(16)
 
@@ -993,6 +1010,15 @@ struct AddDeviceSheet: View {
                 Button("Add Device") {
                     let trimmedName = name.trimmingCharacters(in: .whitespaces)
                     switch transport {
+                    case .local:
+                        guard model.addLocalDevice(
+                            name: trimmedName.isEmpty ? String(localized: "This Mac") : trimmedName,
+                            socketPath: socketPath
+                        ) else {
+                            saveError = model.actionError
+                            model.actionError = nil
+                            return
+                        }
                     case .ssh:
                         let trimmedTarget = target.trimmingCharacters(in: .whitespaces)
                         model.addDevice(
@@ -2121,13 +2147,16 @@ struct EditDeviceSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var target = ""
+    @State private var socketPath = ""
+    @State private var token = ""
+    @State private var saveError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(
                 systemImage: "pencil",
                 title: String(localized: "Edit Device"),
-                subtitle: String(localized: "Changing the SSH target reconnects the device")
+                subtitle: String(localized: "Changing the connection settings reconnects the device")
             )
             Rectangle().fill(Theme.hairline).frame(height: 1)
 
@@ -2136,9 +2165,29 @@ struct EditDeviceSheet: View {
                 TextField("Name", text: $name)
                     .textFieldStyle(.roundedBorder)
                 Spacer().frame(height: 8)
-                SheetSectionLabel("SSH TARGET")
-                TextField("SSH target", text: $target)
-                    .textFieldStyle(.roundedBorder)
+                switch device.kind {
+                case .local:
+                    SheetSectionLabel("SOCKET PATH")
+                    TextField("Default socket (leave empty)", text: $socketPath)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Leave empty for the default socket, or enter an absolute path or ~/ path.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.textTertiary)
+                case .ssh:
+                    SheetSectionLabel("SSH TARGET")
+                    TextField("SSH target", text: $target)
+                        .textFieldStyle(.roundedBorder)
+                case .tailcat:
+                    SheetSectionLabel("TAILCAT TOKEN")
+                    SecureField("Leave empty to keep the saved token", text: $token)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Leave empty to keep the saved token")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                if let saveError {
+                    Text(saveError).font(.callout).foregroundStyle(Theme.danger)
+                }
             }
             .padding(16)
 
@@ -2150,20 +2199,25 @@ struct EditDeviceSheet: View {
                     .keyboardShortcut(.cancelAction)
                     .focusEffectDisabled()
                 Button("Save") {
-                    let trimmedName = name.trimmingCharacters(in: .whitespaces)
-                    let trimmedTarget = target.trimmingCharacters(in: .whitespaces)
-                    model.updateDevice(
+                    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard model.updateDevice(
                         device.id,
-                        name: trimmedName.isEmpty ? trimmedTarget : trimmedName,
-                        sshTarget: trimmedTarget
-                    )
+                        name: trimmedName.isEmpty ? device.name : trimmedName,
+                        sshTarget: target,
+                        socketPath: socketPath,
+                        tailcatToken: token
+                    ) else {
+                        saveError = model.actionError
+                        model.actionError = nil
+                        return
+                    }
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .keyboardShortcut(.defaultAction)
                 .focusEffectDisabled()
-                .disabled(target.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(device.sshTarget != nil && target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -2173,6 +2227,7 @@ struct EditDeviceSheet: View {
         .onAppear {
             name = device.name
             target = device.sshTarget ?? ""
+            socketPath = device.socketPath ?? ""
         }
     }
 }

@@ -51,6 +51,7 @@ extension Device {
     var localizedSubtitle: String {
         switch kind {
         case .local:
+            if let socketPath { return String(localized: "This Mac · \(socketPath)") }
             return String(localized: "This Mac · gooseagent.sock")
         case .ssh(let target):
             return String(localized: "\(target) · SSH")
