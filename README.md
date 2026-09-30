@@ -4,7 +4,7 @@ macOS workspace for Goose Agent, a native terminal UI for local and remote codin
 
 ## Demo
 
-https://github.com/user-attachments/assets/6506df3f-f584-4590-8c41-0f40bd3f6803
+https://github.com/user-attachments/assets/4138898f-bf27-426a-b87d-7f23280178ae
 
 ## Remote devices
 
