@@ -2,6 +2,10 @@
 
 macOS workspace for Goose Agent, a native terminal UI for local and remote coding-agent sessions.
 
+## Demo
+
+https://github.com/user-attachments/assets/64ebdab0-6db3-4c3c-abe4-77a641399998
+
 ## Local build
 
 Requires macOS, Xcode, and XcodeGen. Generate the project and build a debug app with:
