@@ -11,7 +11,7 @@ https://github.com/user-attachments/assets/4138898f-bf27-426a-b87d-7f23280178ae
 Devices can be reached over SSH, or over a Tailcat (WireGuard/DERP) tunnel.
 
 - **SSH** uses your OpenSSH config/agent and needs nothing extra on the remote Mac beyond a running gooseagent.
-- **Tailcat** client code is in this repo: the add-device flow, Keychain token storage, and an embedded tunnel bridge (`Packages/GooseTailcat`, built on [tailscale/tailcat](https://github.com/tailscale/tailcat)). It only carries the gooseagent socket, so standalone shells and the Files workspace still need SSH. It has unit tests for the local bridge paths only. It has not been verified end to end in this repository.
+- **Tailcat** client code is in this repo: the add-device flow, Keychain token storage, and an embedded tunnel bridge (`Packages/GooseTailcat`, built on [tailscale/tailcat](https://github.com/tailscale/tailcat)). It only carries the gooseagent socket, so standalone shells and the Files workspace still need SSH. It has not been verified end to end in this repository.
 - **The remote end is not part of this repo.** A Tailcat device needs the third-party gooseagent plugin [`lbr77/gooseagent-plugin-tailcat`](https://github.com/lbr77/gooseagent-plugin-tailcat) (`gooseagent plugin install lbr77/gooseagent-plugin-tailcat`) installed on the remote host to expose the `gooseagent.tailcat` socket and issue the token. That plugin is not maintained here, and its repository could not be opened anonymously when this was written, so the plugin's availability is not guaranteed.
 
 ## Local build

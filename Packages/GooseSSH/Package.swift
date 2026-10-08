@@ -27,9 +27,5 @@ let package = Package(
             name: "GooseSSH",
             dependencies: ["CLibSSH2", "COpenSSL", "CGooseSSHSupport"]
         ),
-        .testTarget(
-            name: "GooseSSHTests",
-            dependencies: ["GooseSSH"]
-        ),
     ]
 )

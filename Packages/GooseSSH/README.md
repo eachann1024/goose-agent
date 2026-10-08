@@ -41,21 +41,6 @@ and signature switches disabled; the small reviewed patch in `Patches/`
 removes SHA-1 key exchange and MAC methods that libssh2 1.11.1 otherwise has no
 build switch for.
 
-## Tests
-
-Swift Testing under `Tests/GooseSSHTests`. From the repo root:
-
-```sh
-make ssh-test
-```
-
-That runs `xcodebuild test -scheme GooseSSH` against an iOS Simulator. Unit
-tests always run. Session-driver e2e tests enable only when a disposable sshd
-fixture exports `HEELER_SSH_E2E_*` into the Simulator (`simctl … launchctl
-setenv`); without that fixture they skip. gooseagent does not currently ship the
-OpenSSH fixture runner — keep unit coverage green via `make ssh-test` /
-`make mobile-build`.
-
 ## Jump Host
 
 `SSHConnection.connectThrough(to:timeout:)` opens a `direct-tcpip` channel on
