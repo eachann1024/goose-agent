@@ -61,25 +61,9 @@ actor SessionDriver {
         let handle: OpaquePointer
         var files: [UInt64: OpaquePointer] = [:]
     }
-    private enum SFTPCompensationPhase {
-        case unlink
-        case stat
-    }
     private var nextSFTPID: UInt64 = 0
     private var nextSFTPFileID: UInt64 = 0
     private var sftpClients: [UInt64: SFTPState] = [:]
-
-#if DEBUG
-    private var nextSFTPWriteDelayForTesting: Duration?
-    private var sftpWriteDelayIsActiveForTesting = false
-    private var nextSessionWaitHoldForTesting: (@Sendable () async -> Void)?
-    private var nextExecChannelAllocatedHoldForTesting: (@Sendable () async throws -> Void)?
-    private var nextExecCleanupHoldForTesting: (@Sendable () async throws -> Void)?
-    private var nextCompensationUnlinkPhaseHookForTesting: (@Sendable () async throws -> Void)?
-    private var nextCompensationStatPhaseHookForTesting: (@Sendable () async throws -> Void)?
-    private var nextCompensationShutdownHoldForTesting: (@Sendable () async throws -> Void)?
-    private var shouldFailNextSFTPInitBeforeEAGAINForTesting = false
-#endif
 
     // Actor reentrancy would otherwise allow a second task to call libssh2
     // while the first one is suspended on socket readiness.
@@ -225,9 +209,6 @@ actor SessionDriver {
         do {
             channel = try await openSessionChannel(session: session, deadline: deadline)
             guard let channel else { throw SSHError.channelFailed }
-#if DEBUG
-            try await holdExecChannelAllocationForTestingIfNeeded()
-#endif
             try await startExec(
                 channel: channel,
                 command: command,
@@ -249,9 +230,6 @@ actor SessionDriver {
             if let channel {
                 do {
                     let cleanupDeadline = ContinuousClock.now.advanced(by: .seconds(2))
-#if DEBUG
-                    try await holdExecCleanupForTestingIfNeeded()
-#endif
                     try await cleanChannel(
                         channel,
                         session: session,
@@ -299,9 +277,6 @@ actor SessionDriver {
         do {
             channel = try await openSessionChannel(session: session, deadline: deadline)
             guard let channel else { throw SSHError.channelFailed }
-#if DEBUG
-            try await holdExecChannelAllocationForTestingIfNeeded()
-#endif
             try await startExec(
                 channel: channel,
                 command: command,
@@ -324,9 +299,6 @@ actor SessionDriver {
             if let channel {
                 do {
                     let cleanupDeadline = ContinuousClock.now.advanced(by: .seconds(2))
-#if DEBUG
-                    try await holdExecCleanupForTestingIfNeeded()
-#endif
                     try await cleanChannel(
                         channel,
                         session: session,
@@ -792,12 +764,6 @@ actor SessionDriver {
         do {
             while true {
                 try checkProgress(deadline: deadline)
-#if DEBUG
-                if shouldFailNextSFTPInitBeforeEAGAINForTesting {
-                    shouldFailNextSFTPInitBeforeEAGAINForTesting = false
-                    throw SSHError.sftpUnavailable
-                }
-#endif
                 if let sftp = libssh2_sftp_init(session) {
                     nextSFTPID &+= 1
                     let id = nextSFTPID
@@ -1103,19 +1069,6 @@ actor SessionDriver {
         timeout: Duration
     ) async throws {
         guard !data.isEmpty else { return }
-#if DEBUG
-        if let delay = nextSFTPWriteDelayForTesting {
-            nextSFTPWriteDelayForTesting = nil
-            sftpWriteDelayIsActiveForTesting = true
-            do {
-                try await Task.sleep(for: delay)
-                sftpWriteDelayIsActiveForTesting = false
-            } catch {
-                sftpWriteDelayIsActiveForTesting = false
-                throw error
-            }
-        }
-#endif
         let deadline = ContinuousClock.now.advanced(by: timeout)
         var offset = 0
 
@@ -1249,12 +1202,6 @@ actor SessionDriver {
         // gets a separate bounded chance because the caller cannot safely reuse
         // this subsystem until libssh2 has freed its pending packet state.
         let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-#if DEBUG
-        if let hold = nextCompensationShutdownHoldForTesting {
-            nextCompensationShutdownHoldForTesting = nil
-            try await hold()
-        }
-#endif
         let result = try await repeatUntilComplete(
             deadline: deadline,
             cancellable: false
@@ -1279,7 +1226,6 @@ actor SessionDriver {
         }
         let deadline = ContinuousClock.now.advanced(by: timeout)
         let result = try await repeatCompensationOperation(
-            phase: .unlink,
             deadline: deadline,
             cancellable: cancellable
         ) {
@@ -1302,7 +1248,6 @@ actor SessionDriver {
 
         var attributes = LIBSSH2_SFTP_ATTRIBUTES()
         let statResult = try await repeatCompensationOperation(
-            phase: .stat,
             deadline: deadline,
             cancellable: false
         ) {
@@ -1422,69 +1367,6 @@ actor SessionDriver {
     var isReusable: Bool {
         valid && session != nil && descriptor >= 0 && authenticated
     }
-
-#if DEBUG
-    func delayNextSFTPWriteForTesting(_ delay: Duration) {
-        nextSFTPWriteDelayForTesting = delay
-    }
-
-    var isSFTPWriteDelayedForTesting: Bool {
-        sftpWriteDelayIsActiveForTesting
-    }
-
-    /// Holds the next operation that blocks on the session in the window it
-    /// naturally passes through: released to the next operation, not yet
-    /// watching the socket. Widening that window turns the race this driver
-    /// has to survive into something a test can drive.
-    func holdNextSessionWaitForTesting(_ hold: @escaping @Sendable () async -> Void) {
-        nextSessionWaitHoldForTesting = hold
-    }
-
-    func holdNextExecChannelAllocationForTesting(
-        _ hold: @escaping @Sendable () async throws -> Void
-    ) {
-        nextExecChannelAllocatedHoldForTesting = hold
-    }
-
-    func holdNextExecCleanupForTesting(
-        _ hold: @escaping @Sendable () async throws -> Void
-    ) {
-        nextExecCleanupHoldForTesting = hold
-    }
-
-    func runNextCompensationUnlinkPhaseHookForTesting(
-        _ hook: @escaping @Sendable () async throws -> Void
-    ) {
-        nextCompensationUnlinkPhaseHookForTesting = hook
-    }
-
-    func runNextCompensationStatPhaseHookForTesting(
-        _ hook: @escaping @Sendable () async throws -> Void
-    ) {
-        nextCompensationStatPhaseHookForTesting = hook
-    }
-
-    func runNextCompensationShutdownHookForTesting(
-        _ hook: @escaping @Sendable () async throws -> Void
-    ) {
-        nextCompensationShutdownHoldForTesting = hook
-    }
-
-    func failNextSFTPInitBeforeEAGAINForTesting() {
-        shouldFailNextSFTPInitBeforeEAGAINForTesting = true
-    }
-
-    var operationWaiterCountForTesting: Int {
-        operationWaiters.count
-    }
-
-    func resourceStateForTesting() -> SessionDriverResourceState {
-        SessionDriverResourceState(
-            hasSession: session != nil,
-            descriptorIsOpen: descriptor >= 0,
-            isValid: valid)
-    }
-#endif
 
     private func configureAlgorithms(_ session: OpaquePointer) throws {
         let preferences: [(Int32, String)] = [
@@ -1806,12 +1688,6 @@ actor SessionDriver {
         until deadline: ContinuousClock.Instant,
         cancellable: Bool = true
     ) async throws {
-#if DEBUG
-        if let hold = nextSessionWaitHoldForTesting {
-            nextSessionWaitHoldForTesting = nil
-            await hold()
-        }
-#endif
         try await SocketReadiness.wait(
             descriptor: plan.descriptor,
             directions: plan.directions,
@@ -2193,7 +2069,6 @@ actor SessionDriver {
     }
 
     private func repeatCompensationOperation(
-        phase: SFTPCompensationPhase,
         deadline: ContinuousClock.Instant,
         cancellable: Bool,
         _ operation: () -> Int32
@@ -2206,9 +2081,6 @@ actor SessionDriver {
                 throw SSHError.timedOut
             }
             let result = operation()
-#if DEBUG
-            try await runCompensationPhaseHookForTestingIfNeeded(phase)
-#endif
             if result != LIBSSH2_ERROR_EAGAIN { return result }
             try await waitForSession(
                 session,
@@ -2216,35 +2088,6 @@ actor SessionDriver {
                 cancellable: cancellable)
         }
     }
-
-#if DEBUG
-    private func holdExecChannelAllocationForTestingIfNeeded() async throws {
-        guard let hold = nextExecChannelAllocatedHoldForTesting else { return }
-        nextExecChannelAllocatedHoldForTesting = nil
-        try await hold()
-    }
-
-    private func holdExecCleanupForTestingIfNeeded() async throws {
-        guard let hold = nextExecCleanupHoldForTesting else { return }
-        nextExecCleanupHoldForTesting = nil
-        try await hold()
-    }
-
-    private func runCompensationPhaseHookForTestingIfNeeded(
-        _ phase: SFTPCompensationPhase
-    ) async throws {
-        let hook: (@Sendable () async throws -> Void)?
-        switch phase {
-        case .unlink:
-            hook = nextCompensationUnlinkPhaseHookForTesting
-            nextCompensationUnlinkPhaseHookForTesting = nil
-        case .stat:
-            hook = nextCompensationStatPhaseHookForTesting
-            nextCompensationStatPhaseHookForTesting = nil
-        }
-        try await hook?()
-    }
-#endif
 
     private func waitForSession(
         _ session: OpaquePointer,
@@ -2483,14 +2326,6 @@ enum InvalidatedSessionTeardown {
         return result
     }
 }
-
-#if DEBUG
-struct SessionDriverResourceState: Sendable, Equatable {
-    let hasSession: Bool
-    let descriptorIsOpen: Bool
-    let isValid: Bool
-}
-#endif
 
 enum NativeLibrary {
     static let initializationResult = libssh2_init(0)

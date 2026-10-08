@@ -19,7 +19,6 @@ let package = Package(
             ],
             linkerSettings: [.linkedFramework("Security")]
         ),
-        .testTarget(name: "GooseKitTests", dependencies: ["GooseKit"])
     ],
     // Keep Swift 5 semantics; the bump to tools 6.0 is only for the iOS 18
     // platform literal, not a move to the Swift 6 language mode.

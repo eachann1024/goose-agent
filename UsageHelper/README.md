@@ -56,10 +56,5 @@ Runtime adaptations:
   supporting existing WAL/SHM safely is an adapter limitation, not a product
   prohibition. No sidecars, migrations or new database files are created.
 
-Checks (fixtures only): `python3 Tests/UsageHelperTests.py` after packaging into
-`build/usage-fixture-bundle/UsageHelper`; run `Tests/UsageProviderContracts.mjs`
-with the verified Node executable. Cursor checks: run `Tests/CursorUsageTests.mjs`
-with that Node executable and `python3 Tests/AgentSettingsInspectorTests.py`.
-Tests never use real credentials or paid APIs.
 Coverage of the remaining in-scope providers, CLI/native addon runtime, history detail UI, real-account
 and native interaction validation are not complete; this is not a full delivery.

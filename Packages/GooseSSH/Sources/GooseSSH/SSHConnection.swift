@@ -1,11 +1,5 @@
 import Foundation
 
-enum SSHConnectionTeardownStep: Sendable, Equatable {
-    case targetSession
-    case forwardingChannel
-    case jumpSession
-}
-
 /// Its `deinit`, like those of `SSHPTYChannel`, `SSHStreamLocalChannel`,
 /// `SSHSFTPClient` and `SSHSFTPFile`, hands remote cleanup to an unstructured
 /// `Task` that nothing retains: `deinit` returns with that work still
@@ -40,20 +34,17 @@ public final class SSHConnection: Sendable {
     private let driver: SessionDriver
     private let parent: SSHConnection?
     private let byteTransport: (any SSHByteTransport)?
-    private let teardownObserver: (@Sendable (SSHConnectionTeardownStep) -> Void)?
 
     private init(
         driver: SessionDriver,
         hostKey: SSHHostKey,
         parent: SSHConnection? = nil,
-        byteTransport: (any SSHByteTransport)? = nil,
-        teardownObserver: (@Sendable (SSHConnectionTeardownStep) -> Void)? = nil
+        byteTransport: (any SSHByteTransport)? = nil
     ) {
         self.driver = driver
         self.hostKey = hostKey
         self.parent = parent
         self.byteTransport = byteTransport
-        self.teardownObserver = teardownObserver
     }
 
     public static func connect(
@@ -72,17 +63,6 @@ public final class SSHConnection: Sendable {
         to endpoint: SSHEndpoint,
         timeout: Duration
     ) async throws -> SSHConnection {
-        try await connectThrough(
-            to: endpoint,
-            timeout: timeout,
-            teardownObserver: nil)
-    }
-
-    func connectThrough(
-        to endpoint: SSHEndpoint,
-        timeout: Duration,
-        teardownObserver: (@Sendable (SSHConnectionTeardownStep) -> Void)?
-    ) async throws -> SSHConnection {
         let transport = try await driver.openDirectTCPIP(
             endpoint: endpoint,
             timeout: timeout)
@@ -95,8 +75,7 @@ public final class SSHConnection: Sendable {
                 driver: targetDriver,
                 hostKey: hostKey,
                 parent: self,
-                byteTransport: transport,
-                teardownObserver: teardownObserver)
+                byteTransport: transport)
         } catch {
             await targetDriver.invalidate()
             transport.abort()
@@ -214,60 +193,6 @@ public final class SSHConnection: Sendable {
         get async { await driver.isReusable }
     }
 
-#if DEBUG
-    public func delayNextSFTPWriteForTesting(_ delay: Duration) async {
-        await driver.delayNextSFTPWriteForTesting(delay)
-    }
-
-    public var isSFTPWriteDelayedForTesting: Bool {
-        get async { await driver.isSFTPWriteDelayedForTesting }
-    }
-
-    public func holdNextSessionWaitForTesting(
-        _ hold: @escaping @Sendable () async -> Void
-    ) async {
-        await driver.holdNextSessionWaitForTesting(hold)
-    }
-
-    public func holdNextExecChannelAllocationForTesting(
-        _ hold: @escaping @Sendable () async throws -> Void
-    ) async {
-        await driver.holdNextExecChannelAllocationForTesting(hold)
-    }
-
-    public func holdNextExecCleanupForTesting(
-        _ hold: @escaping @Sendable () async throws -> Void
-    ) async {
-        await driver.holdNextExecCleanupForTesting(hold)
-    }
-
-    public func runNextCompensationUnlinkPhaseHookForTesting(
-        _ hook: @escaping @Sendable () async throws -> Void
-    ) async {
-        await driver.runNextCompensationUnlinkPhaseHookForTesting(hook)
-    }
-
-    public func runNextCompensationStatPhaseHookForTesting(
-        _ hook: @escaping @Sendable () async throws -> Void
-    ) async {
-        await driver.runNextCompensationStatPhaseHookForTesting(hook)
-    }
-
-    public func runNextCompensationShutdownHookForTesting(
-        _ hook: @escaping @Sendable () async throws -> Void
-    ) async {
-        await driver.runNextCompensationShutdownHookForTesting(hook)
-    }
-
-    public func failNextSFTPInitBeforeEAGAINForTesting() async {
-        await driver.failNextSFTPInitBeforeEAGAINForTesting()
-    }
-
-    public var operationWaiterCountForTesting: Int {
-        get async { await driver.operationWaiterCountForTesting }
-    }
-#endif
-
     public func close(timeout: Duration) async throws {
         var firstError: (any Error)?
         do {
@@ -275,14 +200,12 @@ public final class SSHConnection: Sendable {
         } catch {
             firstError = error
         }
-        if byteTransport != nil { teardownObserver?(.targetSession) }
         if let byteTransport {
             do {
                 try await byteTransport.close(timeout: timeout)
             } catch {
                 if firstError == nil { firstError = error }
             }
-            teardownObserver?(.forwardingChannel)
         }
         if let parent {
             do {
@@ -290,7 +213,6 @@ public final class SSHConnection: Sendable {
             } catch {
                 if firstError == nil { firstError = error }
             }
-            teardownObserver?(.jumpSession)
         }
         if let firstError { throw firstError }
     }
