@@ -559,7 +559,7 @@ struct SettingsView: View {
                     .frame(width: 36, height: 36)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Goose Agent").font(.system(size: 14, weight: .semibold))
+                    Text(verbatim: AppDisplayName.current).font(.system(size: 14, weight: .semibold))
                     Text("Settings")
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -1637,7 +1637,7 @@ struct NotificationSettingsView: View {
 
 struct AboutSettingsView: View {
     var body: some View {
-        SettingsSection(title: "Goose Agent") {
+        SettingsSection(title: LocalizedStringKey(stringLiteral: AppDisplayName.current)) {
             SettingsRow {
                 Text("Goose Agent — a native macOS console.")
                     .fixedSize(horizontal: false, vertical: true)

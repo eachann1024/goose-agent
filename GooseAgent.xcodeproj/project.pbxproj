@@ -427,6 +427,7 @@
 				DD10A1A321A9BF738D077C5B /* Resources */,
 				1C83D6EE52F8D71EC83D8C7F /* Frameworks */,
 				C61E386F21B205B9072A9338 /* Package usage helper */,
+				B8E4A17C2D9F4061A3C5E8B0 /* Localized display name */,
 			);
 			buildRules = (
 			);
@@ -467,6 +468,7 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = 2625B80CF0C24A37565CDB99;
 			minimizedProjectReferenceProxies = 1;
@@ -574,6 +576,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "for arch in $ARCHS; do\n  bash \"$SRCROOT/scripts/package-usage-helper.sh\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/UsageHelper\" \"$arch\"\ndone\n";
+		};
+		B8E4A17C2D9F4061A3C5E8B0 /* Localized display name */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Localized display name";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "RES=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nZH=\"$SRCROOT/Resources/zh-Hans.lproj/InfoPlist.strings\"\nEN=\"$SRCROOT/Resources/en.lproj/InfoPlist.strings\"\nfor lang in zh-Hans zh_CN zh-Hans-CN; do\n  mkdir -p \"$RES/$lang.lproj\"\n  cp \"$ZH\" \"$RES/$lang.lproj/InfoPlist.strings\"\ndone\nmkdir -p \"$RES/en.lproj\"\ncp \"$EN\" \"$RES/en.lproj/InfoPlist.strings\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
