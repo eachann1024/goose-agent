@@ -47,6 +47,15 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppDisplayName {
+    static var current: String {
+        if let name = Bundle.main.localizedInfoDictionary?["CFBundleDisplayName"] as? String, !name.isEmpty {
+            return name
+        }
+        return "Goose Agent"
+    }
+}
+
 extension Device {
     var localizedSubtitle: String {
         switch kind {
