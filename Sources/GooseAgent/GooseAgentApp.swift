@@ -1380,6 +1380,7 @@ struct TerminalSettingsView: View {
     @AppStorage(TerminalDefaults.fontWeightKey) private var fontWeight = TerminalDefaults.defaultFontWeight
     @AppStorage(TerminalDefaults.lineSpacingKey) private var lineSpacing = TerminalDefaults.defaultLineSpacing
     @AppStorage("terminal.mouseReporting") private var mouseReporting = true
+    @AppStorage(TerminalDefaults.optionAsAltKey) private var optionAsAlt = true
 
     private let families = TerminalDefaults.monospacedFamilies()
 
@@ -1473,6 +1474,13 @@ struct TerminalSettingsView: View {
                         }
                     }
                 }
+                SettingsRow(divided: true) {
+                    Toggle(isOn: $optionAsAlt) {
+                        Text("Option as Alt")
+                            .font(SettingsLayout.bodyFont)
+                    }
+                    .help("Sends Option to the terminal as Alt, so shortcuts such as Alt+P reach the program.")
+                }
             }
             SettingsSection(title: "Preview") {
                 SettingsRow {
@@ -1489,6 +1497,7 @@ struct TerminalSettingsView: View {
                 lineSpacing = TerminalDefaults.defaultLineSpacing
                 thinStrokes = true
                 mouseReporting = true
+                optionAsAlt = true
             }
         }
         .toggleStyle(SettingsSwitchStyle())

@@ -10,11 +10,19 @@ enum TerminalDefaults {
     static let thinStrokesKey = "terminal.thinStrokes"
     static let fontWeightKey = "terminal.fontWeight"
     static let lineSpacingKey = "terminal.lineSpacing"
+    /// When true, both Option keys are Meta/Alt for the embedded terminal.
+    /// Missing key means on: `@AppStorage` and this reader share that default.
+    static let optionAsAltKey = "terminal.optionAsAlt"
     static let defaultFontSize: Double = 12.5
     /// `NSFont.Weight` rawValue; 0 is `.regular`. Only the system monospaced font
     /// has selectable weights — named families ship fixed faces and ignore this.
     static let defaultFontWeight: Double = 0
     static let defaultLineSpacing: Double = 1.0
+
+    static var optionAsAlt: Bool {
+        guard UserDefaults.standard.object(forKey: optionAsAltKey) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: optionAsAltKey)
+    }
     static let darkBackgroundHex = "#101012"
     static let darkForegroundHex = "#D6D6D6"
     static let lightBackgroundHex = "#FFFFFF"
@@ -108,15 +116,32 @@ enum GhosttyRuntime {
         // ponytail: libghostty 1.6 only updates CSI 996/2031's scheme when the
         // config has distinct conditional themes. Remove once upstream fixes
         // reporting for unconditional configs; actual colors stay in makeTheme.
+        // `macos-option-as-alt` has to be in the config the app object is
+        // created with. A later font overlay can change it, but a surface
+        // born before that overlay still needs Alt from the first key.
+        let optionAsAlt = TerminalDefaults.optionAsAlt ? "true" : "false"
         return .generated(TerminalConfiguration.default.rendered
-            + "\ntheme = light:\(light.path),dark:\(dark.path)\n")
+            + "\ntheme = light:\(light.path),dark:\(dark.path)\n"
+            + "macos-option-as-alt = \(optionAsAlt)\n")
     }
 
     /// Font settings are hot-applied; surfaces pick the change up without a
     /// rebuild, so this runs from every view update — the controller dedupes.
-    static func applyFontSettings(fontName: String, fontSize: Double, fontWeight: Double, lineSpacing: Double) {
+    static func applyFontSettings(
+        fontName: String,
+        fontSize: Double,
+        fontWeight: Double,
+        lineSpacing: Double,
+        optionAsAlt: Bool
+    ) {
         controller.setTerminalConfiguration(
-            fontConfiguration(fontName: fontName, fontSize: fontSize, fontWeight: fontWeight, lineSpacing: lineSpacing)
+            fontConfiguration(
+                fontName: fontName,
+                fontSize: fontSize,
+                fontWeight: fontWeight,
+                lineSpacing: lineSpacing,
+                optionAsAlt: optionAsAlt
+            )
         )
     }
 
@@ -124,7 +149,8 @@ enum GhosttyRuntime {
         fontName: String,
         fontSize: Double,
         fontWeight: Double,
-        lineSpacing: Double
+        lineSpacing: Double,
+        optionAsAlt: Bool
     ) -> TerminalConfiguration {
         TerminalConfiguration { builder in
             builder.withFontSize(Float(fontSize))
@@ -134,8 +160,9 @@ enum GhosttyRuntime {
             // which enables font-thicken — counter it; fake bold at terminal
             // sizes is what the "thin strokes" default exists to avoid.
             builder.withFontThicken(false)
-            // Option-as-Meta keeps readline chords (⌥⌫ → ESC DEL etc.) working.
-            builder.withCustom("macos-option-as-alt", "true")
+            // Option-as-Meta keeps readline and TUI chords (⌥P, ⌥⌫ → ESC DEL).
+            // Repeated here so a settings change overrides the launch-time base.
+            builder.withCustom("macos-option-as-alt", optionAsAlt ? "true" : "false")
             // GooseAgent owns copy only while Ghostty has a local selection. With
             // no local selection, Command-C must reach a mouse-aware pane app.
             builder.withCustom("keybind", "super+c=unbind")
@@ -426,6 +453,9 @@ final class LineBreakTerminalView: AppTerminalView {
     /// When false, mouse button events always stay local even if the TUI
     /// requested mouse reporting (Shift bypasses it either way).
     var mouseReportingEnabled = true
+    /// When true, Option (without Command/Control) is Alt for the PTY and is
+    /// not claimed by app-menu shortcuts such as ⌥P.
+    var optionAsAlt = true
     var appliedDarkAppearance: Bool?
     /// The live surface, captured by the coordinator's lifecycle delegate —
     /// `AppTerminalView.surface` is internal, so selection queries come in here.
@@ -452,11 +482,8 @@ final class LineBreakTerminalView: AppTerminalView {
             return
         }
         // Pure Option shortcuts bypass performKeyEquivalent for first-responder views.
-        let modifiers = event.modifierFlags
-            .intersection(.deviceIndependentFlagsMask)
-            .intersection([.command, .control, .option, .shift])
-        if !modifiers.isEmpty,
-           NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
+        // With Option-as-Alt, those chords belong to the terminal, not the menu.
+        if appMenuClaims(event) {
             locallyConsumedKeyCode = event.keyCode
             return
         }
@@ -508,6 +535,22 @@ final class LineBreakTerminalView: AppTerminalView {
             return "\u{1b}\r"
         }
         return nil
+    }
+
+    /// Command and Control shortcuts stay with the app menu. Option without
+    /// those modifiers is Alt for the embedded terminal when that mode is on,
+    /// so ⌥P and the other Alt chords are not swallowed on the way in.
+    private func appMenuClaims(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection([.command, .control, .option, .shift])
+        guard !modifiers.isEmpty else { return false }
+        if optionAsAlt,
+           modifiers.contains(.option),
+           modifiers.isDisjoint(with: [.command, .control]) {
+            return false
+        }
+        return NSApp.mainMenu?.performKeyEquivalent(with: event) == true
     }
 
     // MARK: Mouse
@@ -660,8 +703,7 @@ final class LineBreakTerminalView: AppTerminalView {
         }
         // Ghostty consumes its default bindings before AppKit reaches the menu.
         // Give GooseAgent's commands priority over those standalone-terminal actions.
-        if !modifiers.isDisjoint(with: [.command, .control, .option, .shift]),
-           NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
+        if appMenuClaims(event) {
             locallyConsumedKeyCode = event.keyCode
             return true
         }
@@ -940,6 +982,7 @@ struct AttachTerminalView: NSViewRepresentable {
     /// When false, mouse drags always select text locally even if the TUI
     /// requested mouse reporting (Shift+drag bypasses it either way).
     var mouseReporting: Bool = true
+    var optionAsAlt: Bool = true
     var onAttachmentError: (String) -> Void = { _ in }
     var onAttachmentUploadingChanged: (Bool) -> Void = { _ in }
     /// Called on the main queue when the attach process exits: the pane was taken
@@ -1027,7 +1070,8 @@ struct AttachTerminalView: NSViewRepresentable {
             fontWeight: fontWeight,
             lineSpacing: lineSpacing,
             dark: dark,
-            mouseReporting: mouseReporting
+            mouseReporting: mouseReporting,
+            optionAsAlt: optionAsAlt
         )
     }
 
@@ -1078,15 +1122,18 @@ struct AttachTerminalView: NSViewRepresentable {
 func applyTerminalAppearance(
     _ view: LineBreakTerminalView,
     fontName: String, fontSize: Double, thinStrokes _: Bool,
-    fontWeight: Double, lineSpacing: Double, dark: Bool, mouseReporting: Bool
+    fontWeight: Double, lineSpacing: Double, dark: Bool, mouseReporting: Bool,
+    optionAsAlt: Bool
 ) {
     GhosttyRuntime.applyFontSettings(
         fontName: fontName,
         fontSize: fontSize,
         fontWeight: fontWeight,
-        lineSpacing: lineSpacing
+        lineSpacing: lineSpacing,
+        optionAsAlt: optionAsAlt
     )
     view.mouseReportingEnabled = mouseReporting
+    view.optionAsAlt = optionAsAlt
     // SwiftUI's scheme must reach the surface, not just the shared controller:
     // Ghostty answers CSI 996 using each surface's conditional theme state.
     view.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -1169,6 +1216,7 @@ struct ShellTerminalView: NSViewRepresentable {
     var lineSpacing: Double = TerminalDefaults.defaultLineSpacing
     var dark: Bool = false
     var mouseReporting: Bool = true
+    var optionAsAlt: Bool = true
     var onExit: ((Int32?) -> Void)? = nil
     var onFocus: (() -> Void)? = nil
 
@@ -1197,7 +1245,8 @@ struct ShellTerminalView: NSViewRepresentable {
             fontWeight: fontWeight,
             lineSpacing: lineSpacing,
             dark: dark,
-            mouseReporting: mouseReporting
+            mouseReporting: mouseReporting,
+            optionAsAlt: optionAsAlt
         )
 
         let command = GooseService(device: device, autoStartLocalServer: false)
@@ -1230,7 +1279,8 @@ struct ShellTerminalView: NSViewRepresentable {
             fontWeight: fontWeight,
             lineSpacing: lineSpacing,
             dark: dark,
-            mouseReporting: mouseReporting
+            mouseReporting: mouseReporting,
+            optionAsAlt: optionAsAlt
         )
     }
 
