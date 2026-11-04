@@ -4248,6 +4248,22 @@
         }
       }
     },
+    "Option as Alt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Option as Alt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Option 作为 Alt"
+          }
+        }
+      }
+    },
     "Only the system monospaced font has selectable weights.": {
       "localizations": {
         "en": {
@@ -5520,6 +5536,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "选择 Agent 或终端，或新建一个"
+          }
+        }
+      }
+    },
+    "Sends Option to the terminal as Alt, so shortcuts such as Alt+P reach the program.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sends Option to the terminal as Alt, so shortcuts such as Alt+P reach the program."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "把 Option 作为 Alt 发给终端，让 Alt+P 这类快捷键进入程序。"
           }
         }
       }

@@ -653,6 +653,7 @@ struct DetailView: View {
     @AppStorage(TerminalDefaults.fontWeightKey) private var terminalFontWeight = TerminalDefaults.defaultFontWeight
     @AppStorage(TerminalDefaults.lineSpacingKey) private var terminalLineSpacing = TerminalDefaults.defaultLineSpacing
     @AppStorage("terminal.mouseReporting") private var terminalMouseReporting = true
+    @AppStorage(TerminalDefaults.optionAsAltKey) private var terminalOptionAsAlt = true
     @Environment(\.colorScheme) private var colorScheme
     /// Per-entry attach state, keyed by `AttachedEntry.id`. `endedAttach` holds the exit
     /// code of a dead attach that *survived* refresh (nil code = no status, e.g. killed
@@ -734,7 +735,8 @@ struct DetailView: View {
             fontName: terminalFontName, fontSize: terminalFontSize,
             thinStrokes: terminalThinStrokes, fontWeight: terminalFontWeight,
             lineSpacing: terminalLineSpacing, dark: colorScheme == .dark,
-            mouseReporting: terminalMouseReporting, onExit: { _ in onExit() },
+            mouseReporting: terminalMouseReporting, optionAsAlt: terminalOptionAsAlt,
+            onExit: { _ in onExit() },
             onFocus: { model.focusTerminalLeaf(id.uuidString, group: group) }
         )
         .padding(.horizontal, 10).padding(.vertical, 8)
@@ -795,6 +797,7 @@ struct DetailView: View {
                 lineSpacing: terminalLineSpacing,
                 dark: colorScheme == .dark,
                 mouseReporting: terminalMouseReporting,
+                optionAsAlt: terminalOptionAsAlt,
                 onAttachmentError: { model.actionError = $0 },
                 onAttachmentUploadingChanged: { uploadingAttachment = $0 },
                 onExit: { code in confirmAttachEnded(session, code: code) },
