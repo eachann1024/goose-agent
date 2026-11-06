@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Goose Agent private maintenance notes
 
 This repository is maintained privately by eachann1024. The macOS app is named **Goose Agent**; keep the `dev.eachann.gooseagent` bundle identifiers stable for local data and package compatibility. `GooseAgent` remains the Swift target/module name unless a task explicitly requires otherwise.
