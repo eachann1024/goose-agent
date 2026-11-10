@@ -1,18 +1,17 @@
-# Goose Agent — 给助手的约定（压缩版）
+# Goose Agent
 
-- **中文优先**：所有用户可见文案必须有 `zh-Hans`；新增 `String(localized:)` / `Label` / `Text` / `Button` / `.help` / `LocalizedStringKey` 时同步写入 `Resources/Localizable.xcstrings`（en + zh-Hans），禁止界面残留英文（专有名词如 Agent、Mac、SSH、路径可保留）。
-- **设置与弹窗尺寸**：共用 `SheetLayout` / Settings 最小宽高；改尺寸只改常量，勿各写死。
-- **快捷键**：走 `AppShortcuts`；侧栏 hover 显示当前绑定；勿再写死 ⌘⌥ 组合。
-- **构建与运行**：改完 `make build`；确认 `/Applications/Goose Agent.app` 已替换且正在运行的是新安装的应用。安装或重启失败不能只报编译成功，须处理失败并如实说明运行状态；编译通过与实际界面验证分别报告。
+- 私有维护的 macOS 应用。bundle identifier 保持 `dev.eachann.gooseagent`（本地数据与安装包兼容），Swift target/模块名保持 `GooseAgent`，除非任务明确要求修改；不加发布自动化、公开更新源或上游营销素材。
+- 文案：用户可见文案都要有 `zh-Hans`，新增 `String(localized:)` / `Label` / `Text` / `Button` / `.help` / `LocalizedStringKey` 时同步写入 `Resources/Localizable.xcstrings`（en + zh-Hans）；界面不留英文，专有名词（Agent、Mac、SSH、路径）除外。
+- 尺寸：设置与弹窗共用 `SheetLayout` / Settings 最小宽高，改尺寸只改常量。
+- 快捷键：走 `AppShortcuts`，侧栏 hover 显示当前绑定，不写死组合键。
+- 构建：改完执行 `make build`（需 Xcode 与 XcodeGen），确认 `/Applications/Goose Agent.app` 已替换且正在运行的是新版本；安装或重启失败要处理并如实说明，编译通过与界面验证分开报告。
 
-## 演示视频与仓库文件
+## README 与仓库文件
 
-- README 只保留一处 GitHub user-attachments 内联视频（单独一行的裸链接）；禁止添加「演示视频 / Watch the video / 旁白版」等文字链接，禁止链接仓库内 raw/blob 的 mp4。
-- 禁止向仓库提交视频副本、封面图、poster、contact sheet、临时脚本或相关文档描述。
+- README 只保留一处 GitHub user-attachments 内联视频（单独一行的裸链接），不加「演示视频 / Watch the video」之类文字链接，不链接仓库内的 mp4。
+- 不提交视频副本、封面图、poster、contact sheet、临时脚本及其说明文档。
 
 ## 提交与推送
 
-- 只在 `main` 上开发，不新建分支或 worktree；当前不在 `main` 时先告知用户。
-- 每次改动完成后，先获取并合并远端最新 `main`（`git fetch origin`，再将 `origin/main` 合入本地），再提交推送；不得只 fetch 不合并，也不得先提交本次改动再同步。同步前妥善保留未提交工作，恢复后也要检查冲突。
-- 有冲突就逐项理解并解决，保留双方有效改动；按影响面完成必要验收后，只原子提交本任务改动并推送 `main`，提交说明用英文。不得覆盖无关工作或强制推送。
-- 推送若因远端新增提交被拒绝，重新同步、解决冲突并复核后重试；完成后确认本地提交已包含在远端，不能把仅本地提交当作已推送。
+- 改动验收后直接提交并推送 `main`，无需询问：先保留未提交工作，`git fetch origin` 并合入 `origin/main`，逐项解决冲突（保留双方有效改动），再只原子提交本任务改动，提交说明用英文。
+- 推送被拒就重新同步、复核后重试，直到远端包含本次提交；不强制推送，不覆盖无关工作。当前不在 `main` 时先告知用户。
